@@ -18,7 +18,7 @@ final class AppModel {
         didSet {
             guard selection != oldValue else { return }
             reloadDisplayed()
-            isPlayerVisible = false
+            hidePlayer()
             filter = ""
         }
     }
@@ -44,6 +44,12 @@ final class AppModel {
         didSet { UserDefaults.standard.set(showVideoList, forKey: "showVideoList") }
     }
 
+    /// Whether the trailing video list panel is on screen right now. Kept
+    /// apart from `showVideoList` (the lasting preference) so the panel can
+    /// close after the player has faded out: closing alongside it drags the
+    /// video sideways mid-fade.
+    var isVideoListOpen = false
+
     var activeSheet: ActiveSheet?
     var alertMessage: String?
 
@@ -52,6 +58,8 @@ final class AppModel {
         self.store = store
         playback = PlaybackModel(store: store)
         library = LibraryService(store: store)
+        // Every link the player surfaces goes through one router.
+        playback.player.onOpenLink = { [weak self] url in self?.openLink(url) }
         reloadDisplayed()
         Task { await CookieStore.shared.syncToWebKit(clearExisting: false) }
     }
@@ -124,6 +132,70 @@ final class AppModel {
         presentPlayer()
     }
 
+    /// Shows the player and the video list panel the way the user left it.
+    func enterPlayer() {
+        isVideoListOpen = showVideoList
+        isPlayerVisible = true
+    }
+
+    /// Leaves the player page, pausing first when the user set that
+    /// (Settings ▸ Playback). The one door for sidebar changes and the
+    /// animated `leavePlayer` alike. Read live so Settings edits apply at
+    /// once.
+    ///
+    /// - Parameter closeListAfterFade: `leavePlayer` passes true; the
+    ///   video list then closes only once the video has faded out.
+    func hidePlayer(closeListAfterFade: Bool = false) {
+        if UserDefaults.standard.object(forKey: "pauseWhenLeavingPlayer") as? Bool ?? true {
+            playback.player.pause()
+        }
+        isPlayerVisible = false
+        if !closeListAfterFade { isVideoListOpen = false }
+    }
+
+    /// The animated door out (Back button): the video fades out where it
+    /// is, then the video list swings shut. Both at once and the closing
+    /// panel drags the video sideways mid-fade.
+    func leavePlayer() {
+        withAnimation(.smooth(duration: 0.25)) {
+            hidePlayer(closeListAfterFade: true)
+        } completion: {
+            withAnimation(.smooth(duration: 0.25)) { self.closeVideoList() }
+        }
+    }
+
+    /// The animated door in (mini player bar): the video list makes room
+    /// first, then the video fades in already at its final position. With
+    /// "Resume when returning" on (Settings ▸ Playback), a paused video
+    /// starts playing again as it comes back into view.
+    func openPlayer() {
+        guard playback.current != nil else { return }
+        withAnimation(.smooth(duration: 0.25)) {
+            isVideoListOpen = showVideoList
+        } completion: {
+            withAnimation(.smooth(duration: 0.25)) {
+                if UserDefaults.standard.object(forKey: "resumeWhenReturningToPlayer") as? Bool ?? true,
+                   !self.playback.player.isPlaying {
+                    self.playback.player.play()
+                }
+                self.enterPlayer()
+            }
+        }
+    }
+
+    /// Closes the panel after the player has faded; skipped if the player
+    /// came back in the meantime (the bar clicked mid-fade).
+    private func closeVideoList() {
+        guard !isPlayerVisible else { return }
+        isVideoListOpen = false
+    }
+
+    /// The toolbar toggle: the lasting preference and the panel together.
+    func toggleVideoList() {
+        showVideoList.toggle()
+        if isPlayerVisible { isVideoListOpen = showVideoList }
+    }
+
     /// Shows `selection` with one of its videos cued, as when picking a
     /// search result.
     func reveal(_ videoID: String, in selection: LibrarySelection) {
@@ -134,9 +206,61 @@ final class AppModel {
         }
     }
 
+    // MARK: Link routing
+
+    /// Bumped on every routed link, so a slow metadata fetch for an earlier
+    /// click can't decide what plays after a newer one.
+    @ObservationIgnored private var linkRequest = 0
+
+    /// Where a clicked link goes: YouTube video links play in the app,
+    /// everything else (channels, playlists, other sites) opens in the browser.
+    func openLink(_ url: URL) {
+        linkRequest += 1
+        let request = linkRequest
+        guard let link = YouTubeURL.videoLink(url) else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+
+        // The video already playing: bring it into view (and jump to the
+        // link's time, if any) rather than loading it again.
+        if playback.current?.id == link.id {
+            showPlayer()
+            if let start = link.start { playback.seek(to: start) }
+            return
+        }
+
+        // A video in the list being shown plays from there, keeping its queue.
+        if let selection, let video = displayedVideos.first(where: { $0.id == link.id }) {
+            playback.play(video, from: displayedVideos, context: selection, startAt: link.start)
+            presentPlayer()
+            return
+        }
+
+        // Not in the library (a video from an unsubscribed channel, say):
+        // ask YouTube what it is, then play it on its own. Only this click's
+        // request may act, and only if nothing else started playing since.
+        let context = selection ?? .latest
+        let preceding = playback.current?.id
+        Task {
+            do {
+                let details = try await InnerTubeClient.shared.video(id: link.id)
+                guard request == linkRequest, playback.current?.id == preceding else { return }
+                playback.play(details.video, from: [details.video], context: context, startAt: link.start)
+                presentPlayer()
+            } catch {
+                guard request == linkRequest, playback.current?.id == preceding else { return }
+                alertMessage = "Couldn't open that video: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Enters the player from the grid or a link: the video list starts
+    /// closed (upstream behavior). Returning via the mini player bar
+    /// (`openPlayer`) restores the panel instead.
     private func presentPlayer() {
         if !isPlayerVisible { showVideoList = false }
-        isPlayerVisible = true
+        enterPlayer()
     }
 
     func deleteSource(_ ref: SourceRef) {
