@@ -23,6 +23,28 @@ xcodegen generate          # regenerates Bower.xcodeproj from project.yml
 open Bower.xcodeproj
 ```
 
+## Regression checks
+
+With Xcode installed, run from the repository root:
+
+```sh
+bash scripts/test-youtube-url.sh
+python3 tests/test-player-navigation.py
+```
+
+The URL suite retains the original 52 checks and adds 114 table-driven checks.
+It compiles the production parser and covers video URLs, domain and
+ID validation, timestamps, and the existing Add-sheet classification. Invalid
+timestamps (non-finite or above `Int32.max` seconds) are ignored without rejecting
+the video; finite negative timestamps retain the existing zero clamp.
+
+The navigation checks extract the production `AppModel` methods and run them
+with in-memory playback, preferences, and queued animation completions. They
+cover pause/resume settings and interrupted navigation without opening the app
+or touching its library. These checks do not replace a full build or real
+SwiftUI/WebKit playback and animation testing. Both runners use temporary
+compiler output and respect an explicit `DEVELOPER_DIR` override.
+
 ## Layout
 
 - `App/` — entry point, menu commands, `AppModel` (selection, sheets, import/export)

@@ -28,23 +28,34 @@ struct ContentView: View {
                 if app.isPlayerVisible {
                     ToolbarItem(placement: .navigation) {
                         Button {
-                            withAnimation(.snappy(duration: 0.25)) { app.isPlayerVisible = false }
+                            app.leavePlayer()
                         } label: {
                             Label("Back", systemImage: "chevron.left")
                         }
                         .help("Back to \(app.displayedTitle)")
                         .keyboardShortcut("[", modifiers: .command)
                     }
+                } else if app.playback.current != nil {
+                    // The bar sits in the toolbar — the top of the window —
+                    // where it can never push the grid around.
+                    ToolbarItem(placement: .principal) {
+                        MiniPlayerBar()
+                    }
+                    .sharedBackgroundVisibility(.hidden)
                 }
             }
         }
         // On the split view rather than the detail column, so the list is
         // always a full-height trailing column; on the detail column it came
         // back under a window-wide toolbar after being toggled.
-        .inspector(isPresented: Binding(get: { app.isPlayerVisible && app.showVideoList },
-                                        // Leaving the player dismisses the inspector too;
-                                        // that must not count as the user hiding the list.
-                                        set: { if app.isPlayerVisible { app.showVideoList = $0 } })) {
+        .inspector(isPresented: Binding(get: { app.isVideoListOpen },
+                                        // Only the user closing the panel lands in the
+                                        // setter; the closes that follow the player out
+                                        // must not count as hiding the list for next time.
+                                        set: {
+                                            app.isVideoListOpen = $0
+                                            if app.isPlayerVisible { app.showVideoList = $0 }
+                                        })) {
             VideoListView()
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 560)
                 .background(InspectorHeaderAnchor())
@@ -90,22 +101,16 @@ struct ContentView: View {
     }
 
     // One persistent group stays at the trailing edge as the inspector toggles.
+    // The mini player bar replaces the old Now Playing entry point.
     private var toolbarControls: some View {
         HStack(spacing: 2) {
-            if !app.isPlayerVisible, app.playback.current != nil {
-                toolbarButton("Now Playing",
-                              systemImage: app.playback.player.isPlaying ? "waveform" : "play.rectangle",
-                              help: "Show Now Playing") {
-                    withAnimation(.snappy(duration: 0.25)) { app.showPlayer() }
-                }
-            }
             toolbarButton("Search", systemImage: "magnifyingglass", help: "Search Videos (⌘K)") {
                 app.activeSheet = .search
             }
             if app.isPlayerVisible {
                 toolbarButton("Video List", systemImage: "sidebar.trailing",
                               help: app.showVideoList ? "Hide Video List" : "Show Video List") {
-                    app.showVideoList.toggle()
+                    app.toggleVideoList()
                 }
             }
         }
@@ -130,6 +135,110 @@ struct ContentView: View {
     private var refreshFailureTitle: String {
         let count = app.library.failures.count
         return "Couldn't update \(count) \(count == 1 ? "source" : "sources")"
+    }
+}
+
+/// The bar's scale in the toolbar. A setting (Settings ▸ Playback); the
+/// raw values persist in UserDefaults.
+enum MiniPlayerSize: String, CaseIterable, Identifiable {
+    case small, regular, large
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .small: "Small"
+        case .regular: "Regular"
+        case .large: "Large"
+        }
+    }
+    var scale: CGFloat {
+        switch self {
+        case .small: 0.85
+        case .regular: 1
+        case .large: 1.15
+        }
+    }
+    var barHeight: CGFloat { 36 * scale }
+    var thumbnailSize: CGSize { CGSize(width: 48 * scale, height: 27 * scale) }
+    var controlSize: CGFloat { 26 * scale }
+}
+
+/// The toolbar bar for a video that keeps playing after leaving the
+/// player. It sits at the top of the window, clear of the grid; the
+/// thumbnail and title open the player, transport stays at hand.
+private struct MiniPlayerBar: View {
+    @Environment(AppModel.self) private var app
+    @AppStorage("miniPlayerSize") private var size: MiniPlayerSize = .regular
+
+    var body: some View {
+        let playback = app.playback
+        HStack(spacing: 8) {
+            Button {
+                app.openPlayer()
+            } label: {
+                HStack(spacing: 10) {
+                    RemoteImage(url: playback.current?.thumbnail)
+                        .frame(width: size.thumbnailSize.width, height: size.thumbnailSize.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(playback.current?.title ?? "")
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                        Text(progressText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Show Now Playing")
+
+            Button {
+                playback.togglePlayPause()
+            } label: {
+                Image(systemName: playback.player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: size.controlSize, height: size.controlSize)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(playback.player.isPlaying ? "Pause" : "Play")
+            .help(playback.player.isPlaying ? "Pause" : "Play")
+
+            Button {
+                app.openPlayer()
+            } label: {
+                // Points down at the grid the bar sits above.
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: size.controlSize, height: size.controlSize)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show Now Playing")
+            .help("Show Now Playing")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .frame(height: size.barHeight)
+        .frame(maxWidth: 480)
+        .glassEffect(.regular.interactive(), in: .capsule)
+    }
+
+    private var progressText: String {
+        let player = app.playback.player
+        // WebKit timing values are external input too; never convert an
+        // unavailable or out-of-range value to Int while rendering.
+        func formatted(_ seconds: Double) -> String {
+            guard seconds.isFinite, seconds >= 0, seconds <= Double(Int32.max) else { return "--:--" }
+            return DurationText.format(seconds: Int(seconds))
+        }
+        let elapsed = formatted(player.currentTime)
+        return player.duration > 1
+            ? "\(elapsed) / \(formatted(player.duration))"
+            : elapsed
     }
 }
 
