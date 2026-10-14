@@ -50,6 +50,8 @@ final class AppModel {
     /// video sideways mid-fade.
     var isVideoListOpen = false
 
+    @ObservationIgnored private var playerTransition = 0
+
     var activeSheet: ActiveSheet?
     var alertMessage: String?
 
@@ -134,6 +136,7 @@ final class AppModel {
 
     /// Shows the player and the video list panel the way the user left it.
     func enterPlayer() {
+        playerTransition += 1
         isVideoListOpen = showVideoList
         isPlayerVisible = true
     }
@@ -146,7 +149,9 @@ final class AppModel {
     /// - Parameter closeListAfterFade: `leavePlayer` passes true; the
     ///   video list then closes only once the video has faded out.
     func hidePlayer(closeListAfterFade: Bool = false) {
-        if UserDefaults.standard.object(forKey: "pauseWhenLeavingPlayer") as? Bool ?? true {
+        playerTransition += 1
+        if isPlayerVisible,
+           UserDefaults.standard.object(forKey: "pauseWhenLeavingPlayer") as? Bool ?? true {
             playback.player.pause()
         }
         isPlayerVisible = false
@@ -157,9 +162,12 @@ final class AppModel {
     /// is, then the video list swings shut. Both at once and the closing
     /// panel drags the video sideways mid-fade.
     func leavePlayer() {
+        var transition = playerTransition
         withAnimation(.smooth(duration: 0.25)) {
             hidePlayer(closeListAfterFade: true)
+            transition = playerTransition
         } completion: {
+            guard transition == self.playerTransition else { return }
             withAnimation(.smooth(duration: 0.25)) { self.closeVideoList() }
         }
     }
@@ -170,9 +178,12 @@ final class AppModel {
     /// starts playing again as it comes back into view.
     func openPlayer() {
         guard playback.current != nil else { return }
+        playerTransition += 1
+        let transition = playerTransition
         withAnimation(.smooth(duration: 0.25)) {
             isVideoListOpen = showVideoList
         } completion: {
+            guard transition == self.playerTransition else { return }
             withAnimation(.smooth(duration: 0.25)) {
                 if UserDefaults.standard.object(forKey: "resumeWhenReturningToPlayer") as? Bool ?? true,
                    !self.playback.player.isPlaying {

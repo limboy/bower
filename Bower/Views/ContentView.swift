@@ -229,9 +229,15 @@ private struct MiniPlayerBar: View {
 
     private var progressText: String {
         let player = app.playback.player
-        let elapsed = DurationText.format(seconds: Int(player.currentTime))
+        // WebKit timing values are external input too; never convert an
+        // unavailable or out-of-range value to Int while rendering.
+        func formatted(_ seconds: Double) -> String {
+            guard seconds.isFinite, seconds >= 0, seconds <= Double(Int32.max) else { return "--:--" }
+            return DurationText.format(seconds: Int(seconds))
+        }
+        let elapsed = formatted(player.currentTime)
         return player.duration > 1
-            ? "\(elapsed) / \(DurationText.format(seconds: Int(player.duration)))"
+            ? "\(elapsed) / \(formatted(player.duration))"
             : elapsed
     }
 }

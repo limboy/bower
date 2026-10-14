@@ -121,14 +121,18 @@ nonisolated enum YouTubeURL {
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 
     /// `t=90`, `t=90s`, `t=1m30s`, `t=1h2m3s` — or `start=`, which embeds use.
+    /// Ignore non-finite values and timestamps beyond Int32.max seconds.
     private static func startTime(_ url: URL) -> Double? {
         guard let raw = (query(url, "t") ?? query(url, "start"))?.lowercased() else { return nil }
-        if let seconds = Double(raw) { return max(seconds, 0) }
+        if let seconds = Double(raw) {
+            guard seconds.isFinite, seconds <= Double(Int32.max) else { return nil }
+            return max(seconds, 0)
+        }
         guard let match = raw.firstMatch(of: /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/) else { return nil }
         let seconds = (Double(match.1 ?? "0") ?? 0) * 3600
             + (Double(match.2 ?? "0") ?? 0) * 60
             + (Double(match.3 ?? "0") ?? 0)
-        return seconds > 0 ? seconds : nil
+        return seconds.isFinite && seconds > 0 && seconds <= Double(Int32.max) ? seconds : nil
     }
 
     /// The `UC…` id when the URL names it directly, so no lookup is needed.
