@@ -377,6 +377,8 @@ final class LibraryStore {
                 .compactMap { index[$0.videoID] ?? $0.video }
         case .history:
             return watchHistory.map(\.video)
+        case .downloads:
+            return []
         }
     }
 
@@ -427,6 +429,7 @@ final class LibraryStore {
         case .latest: "Latest"
         case .bookmarks: "Bookmarks"
         case .history: "History"
+        case .downloads: "Downloads"
         case .folder(let id): folder(id)?.name ?? "Folder"
         case .playlist, .channel: selection.sourceRef.flatMap { source($0)?.title } ?? ""
         }

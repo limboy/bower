@@ -6,7 +6,7 @@ import Observation
 /// playback — the same model as Music.
 @Observable
 final class PlaybackModel {
-    let player = YouTubePlayer()
+    let player: PlaybackPlayer
 
     private(set) var current: Video?
     private(set) var queue: [Video] = [] {
@@ -33,11 +33,16 @@ final class PlaybackModel {
     @ObservationIgnored private var lastPositionSave = Date.distantPast
     @ObservationIgnored private var inspectTask: Task<Void, Never>?
 
-    init(store: LibraryStore) {
+    init(store: LibraryStore, downloads: DownloadManager) {
         self.store = store
+        player = PlaybackPlayer(downloads: downloads)
         player.onEnded = { [weak self] in self?.videoEnded() }
         player.onStartedPlaying = { [weak self] in self?.startedPlaying() }
         player.onProgress = { [weak self] time, duration in self?.progress(time: time, duration: duration) }
+        player.onSourceChanged = { [weak self] in
+            guard let self, let current else { return }
+            inspect(current.id, autoplay: player.isPlaying)
+        }
     }
 
     // MARK: Starting playback
@@ -82,12 +87,14 @@ final class PlaybackModel {
         inspectTask?.cancel()
         let cached = descriptions.cached(videoID)
         descriptionText = cached ?? ""
-        isLoadingDescription = cached == nil
+        let isLocal = player.isLocal
+        isLoadingDescription = cached == nil && !isLocal
+        if isLocal && cached != nil { return }
         inspectTask = Task {
             let client = InnerTubeClient.shared
             let info = await client.playerInfo(videoID: videoID)
             guard !Task.isCancelled, current?.id == videoID else { return }
-            if info.isMembersOnly {
+            if !isLocal && info.isMembersOnly {
                 let following = nextVideo(wrapping: true)
                 store.removeVideo(videoID)
                 if let following, following.id != videoID { start(following, autoplay: autoplay) }

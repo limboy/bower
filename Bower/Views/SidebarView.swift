@@ -56,6 +56,23 @@ struct SidebarView: View {
                     .tag(LibrarySelection.bookmarks)
                 Label("History", systemImage: "clock.arrow.circlepath")
                     .tag(LibrarySelection.history)
+                Label {
+                    HStack {
+                        Text("Downloads")
+                        Spacer(minLength: 0)
+                        if app.downloads.activeCount > 0 {
+                            Text("\(app.downloads.activeCount)")
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "arrow.down.circle")
+                }
+                .tag(LibrarySelection.downloads)
             }
 
             Section("Library") {

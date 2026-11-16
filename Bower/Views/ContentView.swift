@@ -21,7 +21,11 @@ struct ContentView: View {
                     .allowsHitTesting(app.isPlayerVisible)
                     .accessibilityHidden(!app.isPlayerVisible)
                 if !app.isPlayerVisible {
-                    VideoGridView()
+                    if app.selection == .downloads {
+                        DownloadsView()
+                    } else {
+                        VideoGridView()
+                    }
                 }
             }
             .toolbar {
@@ -80,6 +84,7 @@ struct ContentView: View {
         }
         .onChange(of: app.store.contentRevision) { app.libraryChanged() }
         .onChange(of: app.store.userRevision) { app.userDataChanged() }
+        .onChange(of: app.downloads.revision) { app.downloadsChanged() }
         .onChange(of: activeState) { _, state in
             if state == .key { app.library.refreshIfStale() }
         }

@@ -47,6 +47,8 @@ struct AppCommands: Commands {
                 .keyboardShortcut("2")
             Button("History") { model.selection = .history }
                 .keyboardShortcut("3")
+            Button("Downloads") { model.selection = .downloads }
+                .keyboardShortcut("4")
             Divider()
             Button("Clear Watch History") { model.store.clearHistory() }
                 .disabled(model.store.watchHistory.isEmpty)

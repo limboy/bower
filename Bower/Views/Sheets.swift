@@ -412,6 +412,26 @@ struct SettingsView: View {
                 Toggle("Keep window on top of other apps", isOn: $alwaysOnTop)
             }
 
+            Section("Downloads") {
+                Picker("Default Quality", selection: Binding(
+                    get: { app.downloads.preferredQuality },
+                    set: { app.downloads.preferredQuality = $0 }
+                )) {
+                    ForEach(DownloadQuality.allCases) { quality in
+                        Text(quality.label).tag(quality)
+                    }
+                }
+
+                LabeledContent("Save To") {
+                    Text(app.downloads.downloadsDirectory.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Button("Open Downloads Folder") { app.downloads.openDownloadsFolder() }
+            }
+
             Section("YouTube Account") {
                 LabeledContent("Cookie") {
                     Text(CookieStore.shared.hasCookie ? "Saved" : "Not set")

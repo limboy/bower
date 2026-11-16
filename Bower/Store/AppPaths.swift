@@ -12,7 +12,20 @@ nonisolated enum AppPaths {
     static var userData: URL { dataDirectory.appending(path: "user.json") }
     static var playback: URL { dataDirectory.appending(path: "playback.json") }
     static var descriptions: URL { dataDirectory.appending(path: "descriptions.json") }
+    static var downloads: URL { dataDirectory.appending(path: "downloads.json") }
     static var cookie: URL { dataDirectory.appending(path: "youtube-cookie.txt") }
+
+    static var partialDownloads: URL {
+        let dir = dataDirectory.appending(path: "partial", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static var documentsDirectory: URL { dataDirectory.appending(path: "Documents", directoryHint: .isDirectory) }
+
+    static var defaultDownloadsDirectory: URL {
+        documentsDirectory.appending(path: "Downloads", directoryHint: .isDirectory)
+    }
 
     static var avatars: URL {
         let dir = dataDirectory.appending(path: "avatars", directoryHint: .isDirectory)

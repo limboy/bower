@@ -13,6 +13,7 @@ final class AppModel {
     let store: LibraryStore
     let playback: PlaybackModel
     let library: LibraryService
+    let downloads: DownloadManager
 
     var selection: LibrarySelection? = .latest {
         didSet {
@@ -49,8 +50,10 @@ final class AppModel {
 
     init() {
         let store = LibraryStore()
+        let downloads = DownloadManager()
         self.store = store
-        playback = PlaybackModel(store: store)
+        self.downloads = downloads
+        playback = PlaybackModel(store: store, downloads: downloads)
         library = LibraryService(store: store)
         reloadDisplayed()
         Task { await CookieStore.shared.syncToWebKit(clearExisting: false) }
@@ -61,9 +64,26 @@ final class AppModel {
     }
 
     func reloadDisplayed() {
-        displayedVideos = selection.map { store.videos(for: $0) } ?? []
+        displayedVideos = selection.map { videos(for: $0) } ?? []
         haystacks = nil
         applyFilter()
+    }
+
+    private func videos(for selection: LibrarySelection) -> [Video] {
+        guard selection == .downloads else { return store.videos(for: selection) }
+        var seen: Set<String> = []
+        return downloads.items.compactMap { item in
+            seen.insert(item.videoID).inserted ? item.video : nil
+        }
+    }
+
+    /// Keep Downloads in the normal player queue and video-list inspector.
+    func downloadsChanged() {
+        playback.player.refreshDownloadSource()
+        if selection == .downloads { reloadDisplayed() }
+        if playback.queueContext == .downloads {
+            playback.libraryChanged(videos(for: .downloads), context: .downloads)
+        }
     }
 
     private func applyFilter() {
@@ -87,7 +107,7 @@ final class AppModel {
             return
         }
         if let context = playback.queueContext {
-            let list = context == selection ? displayedVideos : store.videos(for: context)
+            let list = context == selection ? displayedVideos : videos(for: context)
             playback.libraryChanged(list, context: context)
         }
     }
@@ -97,7 +117,7 @@ final class AppModel {
         let dependent: Set<LibrarySelection> = [.bookmarks, .history]
         if let selection, dependent.contains(selection) { reloadDisplayed() }
         if let context = playback.queueContext, dependent.contains(context) {
-            let list = context == selection ? displayedVideos : store.videos(for: context)
+            let list = context == selection ? displayedVideos : videos(for: context)
             playback.libraryChanged(list, context: context)
         }
     }
@@ -143,6 +163,14 @@ final class AppModel {
         store.remove(ref)
     }
 
+    func removeDownload(_ id: String) {
+        do {
+            try downloads.remove(ids: [id], trashFiles: true)
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
     // MARK: Import / export
 
     func exportLibrary() {
@@ -175,13 +203,14 @@ final class AppModel {
     func flush() {
         playback.flush()
         store.flush()
+        downloads.flush()
     }
 }
 
 extension LibraryStore {
     func isMissing(_ selection: LibrarySelection) -> Bool {
         switch selection {
-        case .latest, .bookmarks, .history: false
+        case .latest, .bookmarks, .history, .downloads: false
         case .folder(let id): folder(id) == nil
         case .playlist, .channel: selection.sourceRef.map { source($0) == nil } ?? true
         }

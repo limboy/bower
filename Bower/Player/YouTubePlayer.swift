@@ -98,6 +98,11 @@ final class YouTubePlayer: NSObject {
 
     func stop() {
         currentVideoID = nil
+        pendingLoad = nil
+        reportedPlaying = false
+        state = .unstarted
+        currentTime = 0
+        duration = 0
         call("player && player.stopVideo()")
     }
 
@@ -113,6 +118,10 @@ final class YouTubePlayer: NSObject {
 
     fileprivate func handle(_ body: Any) {
         guard let message = body as? [String: Any], let type = message["type"] as? String else { return }
+        if type != "ready" {
+            guard let currentVideoID else { return }
+            if let videoID = message["videoID"] as? String, !videoID.isEmpty, videoID != currentVideoID { return }
+        }
         switch type {
         case "ready":
             isReady = true
@@ -173,6 +182,7 @@ final class YouTubePlayer: NSObject {
       function snapshot(type, extra) {
         var m = { type: type };
         try { m.time = player.getCurrentTime(); m.duration = player.getDuration(); } catch (e) {}
+        try { m.videoID = player.getVideoData().video_id; } catch (e) {}
         for (var k in extra) m[k] = extra[k];
         return m;
       }
@@ -186,7 +196,7 @@ final class YouTubePlayer: NSObject {
             onReady: function () { post({ type: 'ready' }); },
             onStateChange: function (e) { post(snapshot('state', { state: e.data })); },
             onApiChange: ltPickCaptions,
-            onError: function (e) { post({ type: 'error', code: e.data }); }
+            onError: function (e) { post(snapshot('error', { code: e.data })); }
           }
         });
       }

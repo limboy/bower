@@ -121,6 +121,7 @@ nonisolated enum LibrarySelection: Hashable, Sendable {
     case latest
     case bookmarks
     case history
+    case downloads
     case playlist(String)
     case channel(String)
     case folder(String)

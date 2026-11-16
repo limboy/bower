@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import SwiftUI
 
 struct NowPlayingView: View {
@@ -10,7 +11,13 @@ struct NowPlayingView: View {
             if let video = playback.current {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        PlayerSurface(player: playback.player)
+                        Group {
+                            if let localPlayer = playback.player.localAVPlayer {
+                                LocalPlayerSurface(player: localPlayer)
+                            } else {
+                                PlayerSurface(player: playback.player.youtube)
+                            }
+                        }
                             .aspectRatio(16 / 9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
@@ -147,6 +154,8 @@ private struct VideoHeader: View {
                 }
                 .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark (⌘D)")
 
+                downloadButton(for: video)
+
                 ShareLink(item: video.watchURL) {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
@@ -173,6 +182,69 @@ private struct VideoHeader: View {
         case .one: "Repeat: One"
         }
     }
+
+    @ViewBuilder
+    private func downloadButton(for video: Video) -> some View {
+        let item = app.downloads.latestItem(for: video.id)
+            ?? app.downloads.items.first { $0.videoID == video.id }
+        if let item, item.status == .completed && item.fileExists {
+            Menu {
+                Button("Reveal in Finder") { app.downloads.revealInFinder(id: item.id) }
+                Button("Show in Downloads") {
+                    app.isPlayerVisible = false
+                    app.selection = .downloads
+                }
+                Divider()
+                Menu("Download Again") {
+                    ForEach(DownloadQuality.allCases) { q in
+                        Button(q.label) { app.downloads.enqueue(video: video, quality: q) }
+                    }
+                }
+            } label: {
+                Label("Downloaded", systemImage: "arrow.down.circle.fill")
+                    .foregroundStyle(.primary)
+            }
+            .menuIndicator(.hidden)
+            .help("Downloaded — Click for options")
+        } else if let item, item.status == .paused {
+            Button {
+                app.downloads.resume(id: item.id)
+            } label: {
+                Label("Resume Download", systemImage: "play.circle")
+            }
+            .help("Resume Download")
+        } else if let item, item.status.isActive {
+            Button {
+                app.removeDownload(item.id)
+            } label: {
+                Label {
+                    Text("Cancel Download")
+                } icon: {
+                    Image(systemName: "arrow.down.circle")
+                        .hidden()
+                        .overlay {
+                            DownloadActivityIndicator(item: item)
+                                .allowsHitTesting(false)
+                        }
+                }
+            }
+            .help("Cancel Download and Remove Files")
+        } else if let item, item.status == .failed || item.status == .cancelled || (item.status == .completed && !item.fileExists) {
+            Button {
+                app.downloads.retry(id: item.id)
+            } label: {
+                Label("Retry Download", systemImage: "arrow.clockwise")
+            }
+            .help("Retry Download")
+        } else {
+            Button {
+                app.downloads.enqueue(video: video)
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+            .help("Download Video")
+        }
+    }
 }
 
 private struct DescriptionSection: View {
@@ -196,6 +268,27 @@ private struct DescriptionSection: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct LocalPlayerSurface: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .inline
+        view.allowsPictureInPicturePlayback = true
+        view.showsFullScreenToggleButton = true
+        view.player = player
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        view.player = player
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player = nil
     }
 }
 
