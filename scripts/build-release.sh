@@ -34,7 +34,7 @@ build_number=${BUILD_NUMBER:-$(git rev-list --count HEAD)}
 derived=build/release
 dist=dist
 sparkle_bin=$derived/SourcePackages/artifacts/sparkle/Sparkle/bin
-mkdir -p $dist
+mkdir -p $derived $dist
 
 # Notes, as Markdown for GitHub and HTML for Sparkle's window.
 if [[ -n $notes_file ]]; then
@@ -48,12 +48,23 @@ fi
 extra=()
 [[ -n ${BUNDLE_ID:-} ]] && extra+=("PRODUCT_BUNDLE_IDENTIFIER=$BUNDLE_ID")
 [[ -n ${FEED_URL:-} ]] && extra+=("SPARKLE_FEED_URL=$FEED_URL")
-xcodebuild -project Bower.xcodeproj -scheme Bower -configuration Release \
+build_log=$derived/build.log
+if ! xcodebuild -project Bower.xcodeproj -scheme Bower -configuration Release \
   -derivedDataPath $derived -clonedSourcePackagesDirPath $derived/SourcePackages \
   MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build_number" "${extra[@]}" \
-  build | grep -E "error:|BUILD" || true
+  build > $build_log 2>&1; then
+  grep -E "error:" $build_log || tail -40 $build_log
+  echo "Build failed." >&2
+  exit 1
+fi
 app=$derived/Build/Products/Release/Bower.app
-[[ -d $app ]] || { echo "Build failed." >&2; exit 1; }
+[[ -d $app ]] || { echo "Build failed: no app bundle at $app." >&2; exit 1; }
+# A failed build can still leave a bundle with resources but no binary.
+exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' $app/Contents/Info.plist 2>/dev/null)
+[[ -n $exe && -x $app/Contents/MacOS/$exe ]] || {
+  echo "Build failed: $app has no executable." >&2
+  exit 1
+}
 
 if [[ -n ${DEVELOPER_ID:-} ]]; then
   # Inside out, as Sparkle's docs lay out, with the hardened runtime and a

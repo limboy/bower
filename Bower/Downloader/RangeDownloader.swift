@@ -223,7 +223,7 @@ nonisolated enum RangeDownloader {
         let initialDone = initialState.chunks.reduce(Int64(0)) { $0 + $1.done }
         onProgress(initialDone, totalSize)
 
-        let saveTask = Task {
+        let saveTask = Task { @Sendable in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { break }
@@ -239,7 +239,7 @@ nonisolated enum RangeDownloader {
 
         try await withThrowingTaskGroup(of: Void.self) { group in
             for idx in initialState.chunks.indices {
-                group.addTask {
+                group.addTask { @Sendable in
                     var lastError: Error?
                     for attempt in 0..<3 {
                         try Task.checkCancellation()

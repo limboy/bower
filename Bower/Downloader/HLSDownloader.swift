@@ -74,7 +74,7 @@ nonisolated enum HLSDownloader {
                 let audioDest = tmpDir.appending(path: "audio.m4a")
                 let combinedProgress = Mutex<(vDone: Int64, vTotal: Int64, aDone: Int64, aTotal: Int64)>((0, 0, 0, 0))
                 try await withThrowingTaskGroup(of: Void.self) { group in
-                    group.addTask {
+                    group.addTask { @Sendable in
                         try await downloadVOD(playlistURL: chosen.url, destURL: videoDest, maxHeight: maxHeight, headers: headers, connections: connections) { d, t in
                             let snap = combinedProgress.withLock { s -> (Int64, Int64) in
                                 s.vDone = d
@@ -84,7 +84,7 @@ nonisolated enum HLSDownloader {
                             onProgress(snap.0, snap.1)
                         }
                     }
-                    group.addTask {
+                    group.addTask { @Sendable in
                         try await downloadVOD(playlistURL: audioURL, destURL: audioDest, maxHeight: 0, headers: headers, connections: max(1, connections / 2)) { d, t in
                             let snap = combinedProgress.withLock { s -> (Int64, Int64) in
                                 s.aDone = d
@@ -131,35 +131,35 @@ nonisolated enum HLSDownloader {
         let progressState = Mutex<(bytes: Int64, completed: Int64)>((0, 0))
         let totalSegments = Int64(segments.count)
         let maxWorkers = max(1, min(connections, segments.count))
+        let nextIndex = Mutex(0)
 
         try await withThrowingTaskGroup(of: Void.self) { group in
-            var nextIdx = 0
-            func addNext() {
-                guard nextIdx < segments.count else { return }
-                let idx = nextIdx
-                let seg = segments[idx]
-                nextIdx += 1
-                group.addTask {
-                    let data = try await fetchSegmentWithRetry(session: session, segment: seg, headers: headers, keyCache: keyCache)
-                    let segFile = tmpDir.appending(path: String(format: "seg_%06d.bin", idx))
-                    try data.write(to: segFile, options: .atomic)
-                    let (bytes, completed) = progressState.withLock { state -> (Int64, Int64) in
-                        state.bytes += Int64(data.count)
-                        state.completed += 1
-                        return state
+            // Each worker takes the next unclaimed segment until none are left,
+            // rather than handing work off from the task-group loop.
+            for _ in 0..<maxWorkers {
+                group.addTask { @Sendable in
+                    while true {
+                        let index = nextIndex.withLock { next -> Int? in
+                            guard next < segments.count else { return nil }
+                            defer { next += 1 }
+                            return next
+                        }
+                        guard let index else { return }
+                        let seg = segments[index]
+                        let data = try await fetchSegmentWithRetry(session: session, segment: seg, headers: headers, keyCache: keyCache)
+                        let segFile = tmpDir.appending(path: String(format: "seg_%06d.bin", index))
+                        try data.write(to: segFile, options: .atomic)
+                        let (bytes, completed) = progressState.withLock { state -> (Int64, Int64) in
+                            state.bytes += Int64(data.count)
+                            state.completed += 1
+                            return state
+                        }
+                        let estTotal = completed > 0 ? (bytes * totalSegments / completed) : 0
+                        onProgress(bytes, estTotal)
                     }
-                    let estTotal = completed > 0 ? (bytes * totalSegments / completed) : 0
-                    onProgress(bytes, estTotal)
                 }
             }
-
-            for _ in 0..<maxWorkers {
-                addNext()
-            }
-            while try await group.next() != nil {
-                try Task.checkCancellation()
-                addNext()
-            }
+            try await group.waitForAll()
         }
 
         let partURL = destURL.appendingPathExtension("part")
