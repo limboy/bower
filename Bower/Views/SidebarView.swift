@@ -40,6 +40,7 @@ struct SidebarView: View {
     @State private var pendingDeletion: PendingDeletion?
     @State private var renamingFolder: Folder?
     @State private var folderName = ""
+    @State private var pendingRevealID: String?
 
     private var store: LibraryStore { app.store }
 
@@ -47,43 +48,52 @@ struct SidebarView: View {
         @Bindable var app = app
         let rows = buildRows()
 
-        List(selection: $app.selection) {
-            Section {
-                Label("Latest", systemImage: "sparkles.tv")
-                    .tag(LibrarySelection.latest)
-                    .background(FolderDropInstaller(canDrop: canDrop(_:intoFolder:), onDrop: drop(_:intoFolder:)))
-                Label("Bookmarks", systemImage: "bookmark")
-                    .tag(LibrarySelection.bookmarks)
-                Label("History", systemImage: "clock.arrow.circlepath")
-                    .tag(LibrarySelection.history)
-                Label {
-                    HStack {
-                        Text("Downloads")
-                        Spacer(minLength: 0)
-                        if app.downloads.activeCount > 0 {
-                            Text("\(app.downloads.activeCount)")
-                                .font(.caption2.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .background(.quaternary, in: Capsule())
+        ScrollViewReader { proxy in
+            List(selection: $app.selection) {
+                Section {
+                    Label("Latest", systemImage: "sparkles.tv")
+                        .tag(LibrarySelection.latest)
+                        .background(FolderDropInstaller(canDrop: canDrop(_:intoFolder:), onDrop: drop(_:intoFolder:)))
+                    Label("Bookmarks", systemImage: "bookmark")
+                        .tag(LibrarySelection.bookmarks)
+                    Label("History", systemImage: "clock.arrow.circlepath")
+                        .tag(LibrarySelection.history)
+                    Label {
+                        HStack {
+                            Text("Downloads")
+                            Spacer(minLength: 0)
+                            if app.downloads.activeCount > 0 {
+                                Text("\(app.downloads.activeCount)")
+                                    .font(.caption2.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
+                                    .background(.quaternary, in: Capsule())
+                            }
                         }
+                    } icon: {
+                        Image(systemName: "arrow.down.circle")
                     }
-                } icon: {
-                    Image(systemName: "arrow.down.circle")
+                    .tag(LibrarySelection.downloads)
                 }
-                .tag(LibrarySelection.downloads)
-            }
 
-            Section("Library") {
-                ForEach(rows) { row in
-                    rowView(row)
-                        .tag(row.selection)
+                Section("Library") {
+                    ForEach(rows) { row in
+                        rowView(row)
+                            .id(row.id)
+                            .tag(row.selection)
+                    }
+                    .onMove { from, to in move(rows: rows, from: from, to: to) }
                 }
-                .onMove { from, to in move(rows: rows, from: from, to: to) }
+            }
+            .listStyle(.sidebar)
+            .onChange(of: app.sidebarRevealToken) { _, _ in
+                revealPlayingSource(in: rows, using: proxy)
+            }
+            .onChange(of: rows.map(\.id)) { _, _ in
+                scrollToPendingIfVisible(in: rows, using: proxy)
             }
         }
-        .listStyle(.sidebar)
         .contextMenu {
             Button("New Folder") { startNewFolder() }
             Button("Add Playlist, Channel, or Video…") { app.activeSheet = .add }
@@ -202,6 +212,30 @@ struct SidebarView: View {
                     .padding(.leading, parent == nil ? 0 : 18)
                     .contextMenu { sourceMenu(ref: ref, title: source.title, parent: parent) }
                     .itemProvider { NSItemProvider(object: Self.dragText(for: ref) as NSString) }
+            }
+        }
+    }
+
+    private func revealPlayingSource(in rows: [SidebarRow], using proxy: ScrollViewProxy) {
+        guard let ref = app.playingSourceRef else { return }
+        if let folderID = store.folderID(containing: ref),
+           let folder = store.folder(folderID),
+           folder.isCollapsed {
+            withAnimation(.snappy(duration: 0.2)) {
+                store.setFolderCollapsed(folderID, false)
+            }
+        }
+        pendingRevealID = "\(ref.type.rawValue):\(ref.id)"
+        scrollToPendingIfVisible(in: rows, using: proxy)
+    }
+
+    private func scrollToPendingIfVisible(in rows: [SidebarRow], using proxy: ScrollViewProxy) {
+        guard let rowID = pendingRevealID,
+              rows.contains(where: { $0.id == rowID }) else { return }
+        pendingRevealID = nil
+        DispatchQueue.main.async {
+            withAnimation(.snappy(duration: 0.25)) {
+                proxy.scrollTo(rowID, anchor: .center)
             }
         }
     }

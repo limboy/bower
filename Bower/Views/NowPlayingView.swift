@@ -79,11 +79,14 @@ struct NowPlayingView: View {
 
 private struct VideoHeader: View {
     @Environment(AppModel.self) private var app
+    @State private var isHoveringSource = false
     let video: Video
 
     var body: some View {
         let playback = app.playback
         let isBookmarked = app.store.isBookmarked(video.id)
+        let sourceRef = app.playingSourceRef
+        let sourceTitle = sourceRef.flatMap { app.store.source($0)?.title } ?? video.sourceTitle
 
         VStack(alignment: .leading, spacing: 10) {
             Button {
@@ -98,15 +101,32 @@ private struct VideoHeader: View {
             .buttonStyle(.plain)
             .help("Open in YouTube")
 
-            HStack(spacing: 6) {
-                let details = [video.sourceTitle, RelativeTime.format(video.publishedDate).nilIfEmpty, video.duration]
+            HStack(spacing: 0) {
+                if sourceRef != nil, let sourceTitle {
+                    Button {
+                        app.revealPlayingSourceInSidebar()
+                    } label: {
+                        Text(sourceTitle)
+                            .foregroundStyle(isHoveringSource ? .primary : .secondary)
+                            .underline(isHoveringSource)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { isHoveringSource = $0 }
+                    .help("Reveal \(sourceTitle) in Sidebar")
+                } else if let sourceTitle {
+                    Text(sourceTitle)
+                }
+                let trailing = [RelativeTime.format(video.publishedDate).nilIfEmpty, video.duration]
                     .compactMap { $0 }
-                Text(details.joined(separator: " · "))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if !trailing.isEmpty {
+                    let prefix = sourceTitle != nil ? " · " : ""
+                    Text(prefix + trailing.joined(separator: " · "))
+                }
                 Spacer()
             }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
 
             HStack(spacing: 10) {
                 ControlGroup {

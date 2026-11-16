@@ -15,11 +15,15 @@ final class AppModel {
     let library: LibraryService
     let downloads: DownloadManager
 
+    @ObservationIgnored private var keepPlayerVisibleOnSelectionChange = false
+
     var selection: LibrarySelection? = .latest {
         didSet {
             guard selection != oldValue else { return }
             reloadDisplayed()
-            isPlayerVisible = false
+            if !keepPlayerVisibleOnSelectionChange {
+                isPlayerVisible = false
+            }
             filter = ""
         }
     }
@@ -47,6 +51,7 @@ final class AppModel {
 
     var activeSheet: ActiveSheet?
     var alertMessage: String?
+    private(set) var sidebarRevealToken = 0
 
     init() {
         let store = LibraryStore()
@@ -152,6 +157,19 @@ final class AppModel {
             playback.play(video, from: displayedVideos, context: selection, autoplay: false)
             presentPlayer()
         }
+    }
+
+    var playingSourceRef: SourceRef? {
+        guard let current = playback.current else { return nil }
+        return store.sourceRef(for: current, context: playback.queueContext)
+    }
+
+    func revealPlayingSourceInSidebar() {
+        guard let ref = playingSourceRef else { return }
+        keepPlayerVisibleOnSelectionChange = true
+        selection = LibrarySelection(ref)
+        keepPlayerVisibleOnSelectionChange = false
+        sidebarRevealToken += 1
     }
 
     private func presentPlayer() {

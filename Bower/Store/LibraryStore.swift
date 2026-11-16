@@ -124,6 +124,38 @@ final class LibraryStore {
         folders.first { $0.id == id }
     }
 
+    /// Finds the playlist or channel a video belongs to, preferring `context`
+    /// (a direct source or a folder) and matching `sourceTitle` when available.
+    func sourceRef(for video: Video, context: LibrarySelection?) -> SourceRef? {
+        if let ref = context?.sourceRef, source(ref) != nil {
+            return ref
+        }
+
+        var candidates: [SourceRef] = []
+        if case .folder(let folderID) = context {
+            candidates.append(contentsOf: folderChildren(folderID))
+        }
+        let orderedKinds: [SourceKind] = context == .bookmarks ? [.playlist, .channel] : [.channel, .playlist]
+        for kind in orderedKinds {
+            for item in sources(kind) {
+                candidates.append(SourceRef(type: kind, id: item.id))
+            }
+        }
+
+        var seen = Set<SourceRef>()
+        var fallback: SourceRef?
+        for ref in candidates where seen.insert(ref).inserted {
+            guard let item = source(ref), item.items.contains(where: { $0.id == video.id }) else { continue }
+            if let title = video.sourceTitle, item.title == title {
+                return ref
+            }
+            if fallback == nil {
+                fallback = ref
+            }
+        }
+        return fallback
+    }
+
     var isEmpty: Bool { playlists.isEmpty && channels.isEmpty }
 
     /// Inserts or replaces a source. New sources go above the first folder,
