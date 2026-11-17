@@ -3,6 +3,10 @@ import Foundation
 import Synchronization
 
 nonisolated enum RangeDownloader {
+    // Large media ranges can be throttled by YouTube. Keep each request small
+    // while retaining the existing worker partitions and resume checkpoints.
+    private static let maxRangeRequestSize: Int64 = 1024 * 1024
+
     struct ChunkState: Codable, Sendable {
         var start: Int64
         var end: Int64
@@ -240,8 +244,8 @@ nonisolated enum RangeDownloader {
         try await withThrowingTaskGroup(of: Void.self) { group in
             for idx in initialState.chunks.indices {
                 group.addTask { @Sendable in
-                    var lastError: Error?
-                    for attempt in 0..<3 {
+                    var consecutiveFailures = 0
+                    while true {
                         try Task.checkCancellation()
                         let chunk = stateLock.withLock { $0.chunks[idx] }
                         let curStart = chunk.start + chunk.done
@@ -255,7 +259,7 @@ nonisolated enum RangeDownloader {
                                 headers: headers,
                                 fd: activeFD,
                                 start: curStart,
-                                end: chunk.end
+                                end: min(chunk.end, curStart + maxRangeRequestSize - 1)
                             ) { written in
                                 let totalDone = stateLock.withLock { state -> Int64 in
                                     state.chunks[idx].done += Int64(written)
@@ -263,15 +267,15 @@ nonisolated enum RangeDownloader {
                                 }
                                 onProgress(totalDone, totalSize)
                             }
-                            return
+                            consecutiveFailures = 0
                         } catch is CancellationError {
                             throw CancellationError()
                         } catch {
-                            lastError = error
-                            try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
+                            consecutiveFailures += 1
+                            guard consecutiveFailures < 3 else { throw error }
+                            try await Task.sleep(for: .milliseconds(400 * consecutiveFailures))
                         }
                     }
-                    if let lastError { throw lastError }
                 }
             }
             try await group.waitForAll()
@@ -299,6 +303,7 @@ nonisolated enum RangeDownloader {
         req.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
 
         let (response, stream, cancelStream) = try await delegate.stream(session: session, request: req)
+        defer { cancelStream() }
         guard response.statusCode == 206 || response.statusCode == 200 else {
             throw YouTubeError("HTTP \(response.statusCode) downloading range \(start)-\(end).")
         }
@@ -341,12 +346,14 @@ nonisolated enum RangeDownloader {
                 onWrite(slice.count)
 
                 if writtenForRange >= maxExpected {
-                    cancelStream()
                     break
                 }
             }
         } onCancel: {
             cancelStream()
+        }
+        guard writtenForRange == maxExpected else {
+            throw URLError(.networkConnectionLost)
         }
     }
 

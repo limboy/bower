@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DownloadsView: View {
     @Environment(AppModel.self) private var app
+    @State private var isShowingClearConfirmation = false
 
     var body: some View {
         let items = app.downloads.items
@@ -50,7 +51,7 @@ struct DownloadsView: View {
                     }
                     if hasFinished {
                         Button {
-                            app.downloads.clearFinishedAndFailed()
+                            isShowingClearConfirmation = true
                         } label: {
                             Label("Clear Finished", systemImage: "xmark.circle")
                         }
@@ -65,6 +66,14 @@ struct DownloadsView: View {
                 }
             }
         }
+        .confirmationDialog("Clear finished downloads?", isPresented: $isShowingClearConfirmation, titleVisibility: .visible) {
+            Button("Clear Finished", role: .destructive) {
+                app.downloads.clearFinishedAndFailed()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Completed, failed, and canceled downloads will be removed from the list. Downloaded files will stay on disk.")
+        }
     }
 
     private var subtitle: String {
@@ -73,11 +82,13 @@ struct DownloadsView: View {
     }
 }
 
-/// A progress ring with a stop symbol, spinning while the download size is unknown.
+/// A progress ring with an optional stop symbol, spinning while the download size is unknown.
 struct DownloadActivityIndicator: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: DownloadItem
+    var size: CGFloat = 16
+    var showsStopSymbol = true
     private let lineWidth: CGFloat = 1.5
 
     private var progress: Double? {
@@ -100,12 +111,14 @@ struct DownloadActivityIndicator: View {
                     .trim(from: 0, to: CGFloat(progress ?? 0.25))
                     .stroke(Color.primary, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                     .rotationEffect(.degrees(rotation - 90))
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.primary)
-                    .frame(width: 6, height: 6)
+                if showsStopSymbol {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.primary)
+                        .frame(width: size * 0.375, height: size * 0.375)
+                }
             }
         }
-            .frame(width: 16, height: 16)
+            .frame(width: size, height: size)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Download progress")
             .accessibilityValue(progress.map { "\(Int(($0 * 100).rounded()))%" } ?? "In progress")

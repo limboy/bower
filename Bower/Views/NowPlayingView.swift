@@ -220,6 +220,9 @@ private struct VideoHeader: View {
                         Button(q.label) { app.downloads.enqueue(video: video, quality: q) }
                     }
                 }
+                Button("Remove Download", role: .destructive) {
+                    app.removeDownload(item.id)
+                }
             } label: {
                 Label("Downloaded", systemImage: "arrow.down.circle.fill")
                     .foregroundStyle(.primary)

@@ -115,13 +115,16 @@ struct VideoCard<MenuContent: View>: View {
         let isBookmarked = app.store.isBookmarked(video.id)
         let isCurrent = app.playback.current?.id == video.id
         let badgeItem = downloadItem ?? app.downloads.latestItem(for: video.id)
+        let showsInlineDownloadStatus = downloadItem.map {
+            $0.status.isActive || ($0.status == .completed && $0.fileExists)
+        } ?? false
 
         VStack(alignment: .leading, spacing: 8) {
             Color.clear
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .overlay { RemoteImage(url: video.thumbnail) }
                 .overlay(alignment: .bottomLeading) {
-                    if let badgeItem {
+                    if let badgeItem, !showsInlineDownloadStatus {
                         downloadBadge(for: badgeItem)
                             .padding(6)
                     }
@@ -175,24 +178,27 @@ struct VideoCard<MenuContent: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(video.title)
                     .font(.headline.weight(isCurrent ? .bold : .semibold))
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if !meta.isEmpty || downloadItem?.status.isActive == true {
+                if !meta.isEmpty || showsInlineDownloadStatus {
                     HStack(spacing: 6) {
                         if !meta.isEmpty {
                             Text(meta)
+                                .font(downloadItem == nil ? .subheadline : .system(size: 12, weight: .medium))
                                 .lineLimit(1)
                         }
-                        if let downloadItem, downloadItem.status.isActive {
-                            Button {
-                                app.removeDownload(downloadItem.id)
-                            } label: {
-                                DownloadActivityIndicator(item: downloadItem)
+                        if let downloadItem, showsInlineDownloadStatus {
+                            Spacer(minLength: 0)
+                            if downloadItem.status.isActive {
+                                DownloadActivityIndicator(item: downloadItem, size: 12, showsStopSymbol: false)
+                                    .allowsHitTesting(false)
+                            } else {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .accessibilityLabel("Downloaded")
+                                    .help("Downloaded")
                             }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Cancel Download")
-                            .help("Cancel Download and Remove Files")
                         }
                     }
                     .font(.subheadline)
