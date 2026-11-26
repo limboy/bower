@@ -9,7 +9,7 @@ struct VideoGridView: View {
     var body: some View {
         let videos = app.displayedVideos
         Group {
-            if app.store.isEmpty && app.displayedVideos.isEmpty && app.selection != .bookmarks && app.selection != .history {
+            if app.store.isEmpty && app.displayedVideos.isEmpty && ![.bookmarks, .history, .hidden].contains(app.selection) {
                 welcome
             } else if app.displayedVideos.isEmpty {
                 ContentUnavailableView {
@@ -64,6 +64,7 @@ struct VideoGridView: View {
         switch app.selection {
         case .bookmarks: "No Bookmarks"
         case .history: "No History"
+        case .hidden: "No Hidden Videos"
         default: "No Videos"
         }
     }
@@ -72,6 +73,7 @@ struct VideoGridView: View {
         switch app.selection {
         case .bookmarks: "bookmark"
         case .history: "clock.arrow.circlepath"
+        case .hidden: "eye.slash"
         default: "play.slash"
         }
     }
@@ -80,6 +82,7 @@ struct VideoGridView: View {
         switch app.selection {
         case .bookmarks: "Bookmark videos from any list, or add a single video by its URL."
         case .history: "Videos you watch will show up here."
+        case .hidden: "Videos you hide are kept out of your lists and skipped during playback."
         default: "Nothing here yet. Check for new videos with ⌘R."
         }
     }
@@ -112,6 +115,8 @@ struct VideoCard<MenuContent: View>: View {
 
     var body: some View {
         let isSkipped = downloadItem == nil && app.store.isSkipped(video.id)
+        // Every card in Hidden is hidden: dimming them all would say nothing.
+        let dims = isSkipped && app.selection != .hidden
         let isBookmarked = app.store.isBookmarked(video.id)
         let isCurrent = app.playback.current?.id == video.id
         let badgeItem = downloadItem ?? app.downloads.latestItem(for: video.id)
@@ -159,10 +164,10 @@ struct VideoCard<MenuContent: View>: View {
                     if downloadItem == nil && (isHovering || isBookmarked || isSkipped) {
                         HStack(spacing: 6) {
                             if isSkipped {
-                                cardButton("eye", help: "Show — include in playback again") { app.store.setSkipped(video.id, false) }
+                                cardButton("eye", help: "Unhide — show in lists and playback again") { app.store.setSkipped(video.id, false) }
                             } else {
                                 if isHovering {
-                                    cardButton("eye.slash", help: "Hide — skip during playback") { app.playback.hide(video) }
+                                    cardButton("eye.slash", help: "Hide — remove from lists and skip during playback") { app.playback.hide(video) }
                                 }
                                 cardButton(isBookmarked ? "bookmark.fill" : "bookmark",
                                            help: isBookmarked ? "Remove Bookmark" : "Bookmark") { app.store.toggleBookmark(video) }
@@ -213,7 +218,7 @@ struct VideoCard<MenuContent: View>: View {
                 }
             }
         }
-        .opacity(isSkipped ? 0.45 : 1)
+        .opacity(dims ? 0.45 : 1)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
@@ -362,9 +367,9 @@ struct VideoContextMenu: View {
         Divider()
         Button(isBookmarked ? "Remove Bookmark" : "Bookmark") { app.store.toggleBookmark(video) }
         if app.store.isSkipped(video.id) {
-            Button("Show in Lists") { app.store.setSkipped(video.id, false) }
+            Button("Unhide Video") { app.store.setSkipped(video.id, false) }
         } else {
-            Button("Hide from Playback") { app.playback.hide(video) }
+            Button("Hide Video") { app.playback.hide(video) }
         }
         Divider()
         downloadMenuItems

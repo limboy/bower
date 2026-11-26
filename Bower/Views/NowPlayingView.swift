@@ -64,6 +64,7 @@ struct NowPlayingView: View {
         switch app.selection {
         case .bookmarks: "No Bookmarks"
         case .history: "No History"
+        case .hidden: "No Hidden Videos"
         default: "No Videos"
         }
     }
@@ -72,6 +73,7 @@ struct NowPlayingView: View {
         switch app.selection {
         case .bookmarks: "Bookmark videos from any list, or add a single video by its URL."
         case .history: "Videos you watch will show up here."
+        case .hidden: "Videos you hide show up here."
         default: "Nothing to play here yet."
         }
     }
@@ -85,6 +87,7 @@ private struct VideoHeader: View {
     var body: some View {
         let playback = app.playback
         let isBookmarked = app.store.isBookmarked(video.id)
+        let isHidden = app.store.isSkipped(video.id)
         let sourceRef = app.playingSourceRef
         let sourceTitle = sourceRef.flatMap { app.store.source($0)?.title } ?? video.sourceTitle
 
@@ -173,6 +176,17 @@ private struct VideoHeader: View {
                     Label(isBookmarked ? "Bookmarked" : "Bookmark", systemImage: isBookmarked ? "bookmark.fill" : "bookmark")
                 }
                 .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark (⌘D)")
+
+                Button {
+                    if isHidden {
+                        app.store.setSkipped(video.id, false)
+                    } else {
+                        app.playback.hide(video)
+                    }
+                } label: {
+                    Label(isHidden ? "Unhide" : "Hide", systemImage: isHidden ? "eye" : "eye.slash")
+                }
+                .help(isHidden ? "Unhide — show in lists and playback again" : "Hide — remove from lists and skip during playback")
 
                 downloadButton(for: video)
 

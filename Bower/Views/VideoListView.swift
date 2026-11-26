@@ -263,7 +263,7 @@ struct VideoRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(isCurrent ? Color.accentColor.opacity(0.16) : isHovering ? Color.primary.opacity(0.05) : .clear)
         }
-        .opacity(isSkipped ? 0.45 : 1)
+        .opacity(isSkipped && app.selection != .hidden ? 0.45 : 1)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture {
@@ -286,12 +286,12 @@ struct VideoRow: View {
     @ViewBuilder
     private func actionButtons(isSkipped: Bool, isBookmarked: Bool) -> some View {
         if isSkipped {
-            rowButton("eye", help: "Show — include this video in playback again") {
+            rowButton("eye", help: "Unhide — show in lists and playback again") {
                 app.store.setSkipped(video.id, false)
             }
         } else {
             if isHovering {
-                rowButton("eye.slash", help: "Hide — skip this video during playback") {
+                rowButton("eye.slash", help: "Hide — remove from lists and skip during playback") {
                     app.playback.hide(video)
                 }
             }

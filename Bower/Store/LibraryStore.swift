@@ -409,9 +409,33 @@ final class LibraryStore {
                 .compactMap { index[$0.videoID] ?? $0.video }
         case .history:
             return watchHistory.map(\.video)
+        case .hidden:
+            return hiddenVideos()
         case .downloads:
             return []
         }
+    }
+
+    /// Hidden videos, newest first. Only their ids are stored, so the details
+    /// come from the library, bookmarks or history; a video found in none of
+    /// them (its source was deleted) can't be shown.
+    private func hiddenVideos() -> [Video] {
+        guard !skipped.isEmpty else { return [] }
+        var found: [String: Video] = [:]
+        for source in playlists + channels {
+            for video in source.items where skipped.contains(video.id) && found[video.id] == nil {
+                var copy = video
+                copy.sourceTitle = copy.sourceTitle ?? source.title
+                found[video.id] = copy
+            }
+        }
+        for bookmark in bookmarks.values {
+            if let video = bookmark.video, skipped.contains(video.id), found[video.id] == nil { found[video.id] = video }
+        }
+        for entry in watchHistory where skipped.contains(entry.videoId) && found[entry.videoId] == nil {
+            found[entry.videoId] = entry.video
+        }
+        return found.values.sorted { ($0.publishedAt ?? 0) > ($1.publishedAt ?? 0) }
     }
 
     /// Every video of the given sources, newest first, tagged with where it
@@ -431,13 +455,20 @@ final class LibraryStore {
 
     /// The `limit` newest videos of the given sources. Only each source's own
     /// newest `limit` can make the cut, so the full library is never sorted.
+    /// Hidden videos are kept (the play queue needs them in place) but don't
+    /// count toward `limit`, so the list still shows `limit` visible videos.
     private func newest(_ sources: [Source], limit: Int) -> [Video] {
         var candidates: [(date: Double, source: Int, item: Int)] = []
         for (sourceIndex, source) in sources.enumerated() {
             var local = source.items.indices.map { (date: source.items[$0].publishedAt ?? 0, source: sourceIndex, item: $0) }
             if local.count > limit {
                 local.sort { $0.date > $1.date }
-                local.removeLast(local.count - limit)
+                var visible = 0
+                let cut = local.firstIndex { candidate in
+                    if !skipped.contains(source.items[candidate.item].id) { visible += 1 }
+                    return visible > limit
+                } ?? local.count
+                local.removeLast(local.count - cut)
             }
             candidates += local
         }
@@ -445,13 +476,15 @@ final class LibraryStore {
 
         var seen = Set<String>()
         var result: [Video] = []
+        var visible = 0
         for candidate in candidates {
             let source = sources[candidate.source]
             var video = source.items[candidate.item]
             guard seen.insert(video.id).inserted else { continue }
             video.sourceTitle = video.sourceTitle ?? source.title
             result.append(video)
-            if result.count == limit { break }
+            if !skipped.contains(video.id) { visible += 1 }
+            if visible == limit { break }
         }
         return result
     }
@@ -461,6 +494,7 @@ final class LibraryStore {
         case .latest: "Latest"
         case .bookmarks: "Bookmarks"
         case .history: "History"
+        case .hidden: "Hidden"
         case .downloads: "Downloads"
         case .folder(let id): folder(id)?.name ?? "Folder"
         case .playlist, .channel: selection.sourceRef.flatMap { source($0)?.title } ?? ""

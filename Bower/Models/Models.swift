@@ -121,10 +121,20 @@ nonisolated enum LibrarySelection: Hashable, Sendable {
     case latest
     case bookmarks
     case history
+    case hidden
     case downloads
     case playlist(String)
     case channel(String)
     case folder(String)
+
+    /// Whether hidden videos are left out of this list. Downloads keep them:
+    /// they were fetched on purpose.
+    var excludesHidden: Bool {
+        switch self {
+        case .hidden, .downloads: false
+        default: true
+        }
+    }
 
     var sourceRef: SourceRef? {
         switch self {

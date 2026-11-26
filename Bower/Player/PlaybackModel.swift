@@ -156,15 +156,20 @@ final class PlaybackModel {
         let list = order
         guard !list.isEmpty else { return nil }
         let index = current.flatMap { video in list.firstIndex { $0.id == video.id } } ?? -1
-        if let found = list[(index + 1)...].first(where: { !store.isSkipped($0.id) }) { return found }
+        if let found = list[(index + 1)...].first(where: { !skips($0) }) { return found }
         guard wrapping, loopMode == .all else { return nil }
-        return list.first { !store.isSkipped($0.id) && $0.id != current?.id }
+        return list.first { !skips($0) && $0.id != current?.id }
     }
 
     private func previousVideo() -> Video? {
         let list = order
         guard let current, let index = list.firstIndex(where: { $0.id == current.id }), index > 0 else { return nil }
-        return list[..<index].last { !store.isSkipped($0.id) }
+        return list[..<index].last { !skips($0) }
+    }
+
+    /// Hidden videos are passed over, except when playing the Hidden list.
+    private func skips(_ video: Video) -> Bool {
+        queueContext != .hidden && store.isSkipped(video.id)
     }
 
     private func rebuildShuffleOrder() {

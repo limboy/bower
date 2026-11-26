@@ -58,6 +58,8 @@ struct SidebarView: View {
                         .tag(LibrarySelection.bookmarks)
                     Label("History", systemImage: "clock.arrow.circlepath")
                         .tag(LibrarySelection.history)
+                    Label("Hidden", systemImage: "eye.slash")
+                        .tag(LibrarySelection.hidden)
                     Label {
                         HStack {
                             Text("Downloads")

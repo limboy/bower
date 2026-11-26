@@ -43,7 +43,14 @@ final class AppModel {
     /// once a video is picked, the player with an optional video list.
     var isPlayerVisible = false
 
+    /// The selected list as shown: without hidden videos, except in Hidden
+    /// itself and Downloads.
     private(set) var displayedVideos: [Video] = []
+
+    /// The selected list with hidden videos left in, used as the play queue so
+    /// hiding a video doesn't shift playback's place in it. Playback skips
+    /// hidden videos on its own.
+    @ObservationIgnored private var queueVideos: [Video] = []
 
     var showVideoList: Bool = UserDefaults.standard.object(forKey: "showVideoList") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showVideoList, forKey: "showVideoList") }
@@ -69,7 +76,10 @@ final class AppModel {
     }
 
     func reloadDisplayed() {
-        displayedVideos = selection.map { videos(for: $0) } ?? []
+        queueVideos = selection.map { videos(for: $0) } ?? []
+        displayedVideos = selection?.excludesHidden == true
+            ? queueVideos.filter { !store.isSkipped($0.id) }
+            : queueVideos
         haystacks = nil
         applyFilter()
     }
@@ -112,31 +122,32 @@ final class AppModel {
             return
         }
         if let context = playback.queueContext {
-            let list = context == selection ? displayedVideos : videos(for: context)
+            let list = context == selection ? queueVideos : videos(for: context)
             playback.libraryChanged(list, context: context)
         }
     }
 
-    /// Bookmarks or history changed: only those two lists depend on them.
+    /// Bookmarks, history or hidden videos changed. Hiding a video changes
+    /// what every list shows, but only these lists' queues.
     func userDataChanged() {
-        let dependent: Set<LibrarySelection> = [.bookmarks, .history]
-        if let selection, dependent.contains(selection) { reloadDisplayed() }
+        reloadDisplayed()
+        let dependent: Set<LibrarySelection> = [.bookmarks, .history, .hidden]
         if let context = playback.queueContext, dependent.contains(context) {
-            let list = context == selection ? displayedVideos : videos(for: context)
+            let list = context == selection ? queueVideos : videos(for: context)
             playback.libraryChanged(list, context: context)
         }
     }
 
     func play(_ video: Video) {
         guard let selection else { return }
-        playback.play(video, from: displayedVideos, context: selection)
+        playback.play(video, from: queueVideos, context: selection)
         presentPlayer()
     }
 
     /// Plays the visible list from the top (or from a random video when
-    /// shuffling), skipping hidden videos.
+    /// shuffling).
     func playAll() {
-        let playable = displayedVideos.filter { !store.isSkipped($0.id) }
+        let playable = displayedVideos
         guard let first = playback.shuffle ? playable.randomElement() : playable.first else { return }
         play(first)
     }
@@ -150,11 +161,13 @@ final class AppModel {
     }
 
     /// Shows `selection` with one of its videos cued, as when picking a
-    /// search result.
+    /// search result. A hidden video is shown in Hidden, the one list that
+    /// has it.
     func reveal(_ videoID: String, in selection: LibrarySelection) {
-        self.selection = selection
-        if let video = displayedVideos.first(where: { $0.id == videoID }) {
-            playback.play(video, from: displayedVideos, context: selection, autoplay: false)
+        let target: LibrarySelection = selection.excludesHidden && store.isSkipped(videoID) ? .hidden : selection
+        self.selection = target
+        if let video = queueVideos.first(where: { $0.id == videoID }) {
+            playback.play(video, from: queueVideos, context: target, autoplay: false)
             presentPlayer()
         }
     }
@@ -228,7 +241,7 @@ final class AppModel {
 extension LibraryStore {
     func isMissing(_ selection: LibrarySelection) -> Bool {
         switch selection {
-        case .latest, .bookmarks, .history, .downloads: false
+        case .latest, .bookmarks, .history, .hidden, .downloads: false
         case .folder(let id): folder(id) == nil
         case .playlist, .channel: selection.sourceRef.map { source($0) == nil } ?? true
         }
