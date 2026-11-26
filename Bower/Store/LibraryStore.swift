@@ -44,7 +44,8 @@ final class LibraryStore {
     @ObservationIgnored private var userSaveTask: Task<Void, Never>?
 
     init() {
-        if let file = JSONFile.read(LibraryFile.self, from: AppPaths.library) {
+        let libraryFile = JSONFile.read(LibraryFile.self, from: AppPaths.library)
+        if let file = libraryFile {
             playlists = file.playlists
             channels = file.channels
             folders = file.folders
@@ -60,6 +61,8 @@ final class LibraryStore {
             lastRefresh = user.lastRefresh.map { Date(timeIntervalSince1970: $0 / 1000) }
         }
         if reconcileSidebarOrder() { scheduleLibrarySave() }
+        // Only with a library to compare against, as for avatars above.
+        if libraryFile != nil { pruneSkipped() }
     }
 
     // MARK: Persistence
@@ -68,9 +71,11 @@ final class LibraryStore {
         if contentChanged { contentRevision += 1 }
         librarySaveTask?.cancel()
         let snapshot = LibraryFile(playlists: playlists, channels: channels, folders: folders, sidebarOrder: sidebarOrder)
-        librarySaveTask = Task {
+        librarySaveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
+            // Debounced with the save, so a refresh of every source checks once.
+            if contentChanged { self?.pruneSkipped() }
             await Self.write(snapshot, to: AppPaths.library)
         }
     }
@@ -347,8 +352,9 @@ final class LibraryStore {
     func isBookmarked(_ videoID: String) -> Bool { bookmarks[videoID] != nil }
 
     func toggleBookmark(_ video: Video) {
-        if bookmarks[video.id] != nil {
+        if let removed = bookmarks[video.id] {
             bookmarks[video.id] = nil
+            if removed.video != nil { pruneSkipped() }
         } else {
             bookmarks[video.id] = Bookmark(videoID: video.id, createdAt: nowMilliseconds(), video: video)
         }
@@ -364,6 +370,25 @@ final class LibraryStore {
 
     func setSkipped(_ videoID: String, _ value: Bool) {
         if value { skipped.insert(videoID) } else { skipped.remove(videoID) }
+        scheduleUserSave()
+    }
+
+    /// Forgets hidden videos that left the library (their source was deleted
+    /// or they aged out of it), so none linger in Hidden or stay filtered
+    /// out of History. A video bookmarked by URL belongs to no source but is
+    /// still in Bookmarks, so it stays hidden.
+    private func pruneSkipped() {
+        guard !skipped.isEmpty else { return }
+        var remaining = skipped
+        for source in playlists + channels {
+            for video in source.items { remaining.remove(video.id) }
+            if remaining.isEmpty { return }
+        }
+        for bookmark in bookmarks.values where bookmark.video != nil {
+            remaining.remove(bookmark.videoID)
+        }
+        guard !remaining.isEmpty else { return }
+        skipped.subtract(remaining)
         scheduleUserSave()
     }
 
@@ -417,8 +442,8 @@ final class LibraryStore {
     }
 
     /// Hidden videos, newest first. Only their ids are stored, so the details
-    /// come from the library, bookmarks or history; a video found in none of
-    /// them (its source was deleted) can't be shown.
+    /// come from the sources, or from a bookmark for a video added by URL.
+    /// `pruneSkipped` drops ids found in neither.
     private func hiddenVideos() -> [Video] {
         guard !skipped.isEmpty else { return [] }
         var found: [String: Video] = [:]
@@ -431,9 +456,6 @@ final class LibraryStore {
         }
         for bookmark in bookmarks.values {
             if let video = bookmark.video, skipped.contains(video.id), found[video.id] == nil { found[video.id] = video }
-        }
-        for entry in watchHistory where skipped.contains(entry.videoId) && found[entry.videoId] == nil {
-            found[entry.videoId] = entry.video
         }
         return found.values.sorted { ($0.publishedAt ?? 0) > ($1.publishedAt ?? 0) }
     }
